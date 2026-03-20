@@ -1,0 +1,61 @@
+name: Docker Image CI/CD
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    tags: [ 'v*.*.*' ]
+  # 支持在 GitHub 网页上手动触发
+  workflow_dispatch:
+
+env:
+  # 替换为你在 DockerHub 上的仓库名，默认为 【你的用户名/mosdns-ui】
+  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/mosdns-ui
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log into Docker Hub
+        # 仅当不是 PR 时登录
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=tag
+            type=sha,prefix=,format=short
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          # 推送到 Docker Hub，如果是 PR 则只构建不推送
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # 开启跨平台构建（如果你后续 NAS 是 ARM 架构，这极其有用）
+          platforms: linux/amd64,linux/arm64
+          # 构建缓存加速
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

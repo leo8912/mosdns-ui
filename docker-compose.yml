@@ -1,0 +1,10 @@
+services:
+  mosdns-ui:
+    build: .
+    container_name: mosdns-ui
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+      - /path/to/your/mosdns/mosdns.log:/etc/mosdns/mosdns.log:ro
+    restart: always

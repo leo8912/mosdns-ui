@@ -1,0 +1,230 @@
+# ==========================================
+# mosdns-x 优化版配置文件 (增加面板支持)
+# 功能: 国内外DNS智能分流 + IPv6支持 + 监控统计
+# 作者: 自动生成 (基于原版优化)
+# ==========================================
+# 
+# 【分流逻辑说明】
+# 1. 查询缓存 → 命中则直接返回
+# 2. 广告域名 → 直接拒绝 (返回 NXDOMAIN)
+# 3. 国内域名列表 → 使用国内DNS解析
+# 4. GFW域名列表 → 使用国外DNS解析
+# 5. 未匹配域名 → 先用国内DNS，若返回非中国IP则改用国外DNS
+# ==========================================
+
+# ------------------------------------------
+# 日志配置
+# ------------------------------------------
+log:
+  level: info         # 改为 info 以支持 _query_summary 记录查询摘要
+  file: "/etc/mosdns/mosdns.log"
+
+# ------------------------------------------
+# 数据文件 (GeoIP/GeoSite 分流数据库)
+# ------------------------------------------
+data_providers:
+  - tag: geosite
+    file: /etc/mosdns/geosite.dat
+    auto_reload: true
+  - tag: geoip
+    file: /etc/mosdns/geoip.dat
+    auto_reload: true
+
+# ------------------------------------------
+# 插件配置
+# ------------------------------------------
+plugins:
+
+  # ==========================================
+  # 【面板增强与监控插件】
+  # ==========================================
+  
+  # 1. 流量指标收集 (供面板展示请求数、延时、缓存命中率)
+  - tag: metrics_collector
+    type: metrics_collector
+
+  # 2. IP 反查域名 (供面板在日志中显示真实的域名而非 IP)
+  - tag: reverse_lookup
+    type: reverse_lookup
+    args:
+      size: 65535
+      ttl: 1800
+      handle_ptr: false
+
+  # ==========================================
+  # 【上游DNS服务器】
+  # ==========================================
+
+  # 国内DNS - 阿里 + 腾讯
+  - tag: cn_dns
+    type: fast_forward
+    args:
+      upstream:
+        - addr: 223.5.5.5
+        - addr: 119.29.29.29
+
+  # 国外DNS - Google + Cloudflare
+  - tag: foreign_dns
+    type: fast_forward
+    args:
+      upstream:
+        - addr: https://1.1.1.1/dns-query
+          socks5: "192.168.2.250:7890"
+        - addr: https://8.8.8.8/dns-query
+          socks5: "192.168.2.250:7890"
+        - addr: https://1.1.1.1/dns-query
+        - addr: https://dns.google/dns-query
+
+  # ==========================================
+  # 【过滤器与匹配规则】
+  # ==========================================
+
+  - tag: cn_domain
+    type: query_matcher
+    args:
+      domain:
+        - /etc/mosdns/rules/direct-list.txt
+        - /etc/mosdns/rules/apple-cn.txt
+        - /etc/mosdns/rules/google-cn.txt
+
+  - tag: gfw_domain
+    type: query_matcher
+    args:
+      domain:
+        - /etc/mosdns/rules/gfw.txt
+        - /etc/mosdns/rules/greatfire.txt
+        - /etc/mosdns/rules/proxy-list.txt
+
+  - tag: ads_domain
+    type: query_matcher
+    args:
+      domain:
+        - /etc/mosdns/rules/reject-list.txt
+
+  - tag: private_domain
+    type: query_matcher
+    args:
+      domain:
+        - "domain:lan"
+        - "domain:local"
+        - "domain:localhost"
+        - "domain:home"
+        - "domain:internal"
+        - "domain:intranet"
+        - "domain:arpa"
+
+  - tag: geosite_cn
+    type: query_matcher
+    args:
+      domain:
+        - "provider:geosite:cn"
+
+  - tag: cn_ip
+    type: response_matcher
+    args:
+      ip:
+        - "provider:geoip:cn"
+
+  - tag: private_ip
+    type: response_matcher
+    args:
+      ip:
+        - "10.0.0.0/8"
+        - "172.16.0.0/12"
+        - "192.168.0.0/16"
+        - "127.0.0.0/8"
+        - "169.254.0.0/16"
+        - "fe80::/10"
+        - "fc00::/7"
+        - "::1/128"
+
+  # ==========================================
+  # 【DNS缓存】
+  # ==========================================
+  - tag: cache
+    type: cache
+    args:
+      size: 200000
+      lazy_cache_ttl: 259200
+      lazy_cache_reply_ttl: 30
+      compress_resp: true
+
+  # ==========================================
+  # 【主处理序列 - 核心分流逻辑】
+  # ==========================================
+  - tag: main_sequence
+    type: sequence
+    args:
+      exec:
+        # --- 监控与反查 ---
+        - metrics_collector    # 统计流量指标
+        - reverse_lookup       # 开启 IP 反查记录
+        - _query_summary       # 记录请求摘要到日志
+        
+        # --- 过滤优化 ---
+        - _misc_optm
+        - _reject_any
+        - cache
+
+        # --- 分流逻辑 ---
+        - if: ads_domain
+          exec:
+            - _new_nxdomain_response
+            - _return
+
+        - if: private_domain
+          exec:
+            - cn_dns
+            - _return
+
+        - if: cn_domain
+          exec:
+            - cn_dns
+            - _return
+
+        - if: gfw_domain
+          exec:
+            - foreign_dns
+            - _return
+
+        - if: geosite_cn
+          exec:
+            - cn_dns
+            - _return
+
+        - cn_dns
+        - if: "(!cn_ip) && (!private_ip)" 
+          exec:
+            - foreign_dns
+
+        - cache
+        - _return
+
+  - tag: qtype_aaaa
+    type: query_matcher
+    args:
+      qtype: [28]
+
+  - tag: main_sequence_v4only
+    type: sequence
+    args:
+      exec:
+        - if: qtype_aaaa
+          exec:
+            - _new_empty_response
+            - _return
+        - main_sequence
+
+# ==========================================
+# 【服务器配置】
+# ==========================================
+api:
+  http: "0.0.0.0:9080"  # 允许局域网访问 API 以支持面板
+
+servers:
+  - exec: main_sequence_v4only
+    listeners:
+      - protocol: udp
+        addr: "[::]:5335"
+      - protocol: tcp
+        addr: "[::]:5335"
