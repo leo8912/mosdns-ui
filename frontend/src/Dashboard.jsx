@@ -8,9 +8,7 @@ import {
   Server, Globe, Hash, ArrowUpRight, ChevronRight,
   Filter, AlertCircle, RefreshCw, Settings
 } from 'lucide-react';
-
-const API_BASE = 'http://localhost:3000/api';
-
+const API_BASE = import.meta.env.DEV ? 'http://localhost:3000/api' : '/api';
 const Dashboard = () => {
   const [status, setStatus] = useState({});
   const [trend, setTrend] = useState([]);
