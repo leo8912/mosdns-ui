@@ -28,17 +28,18 @@ async function fetchAndStoreMetrics() {
 
         const lines = data.split('\n');
         lines.forEach(line => {
-            if (line.startsWith('mosdns_plugin_metrics_collector_query_total')) {
+            // 解析核心指标
+            if (line.includes('query_total')) {
                 current.query_total = parseInt(line.split(' ')[1]);
-            } else if (line.startsWith('mosdns_plugin_cache_hit_total')) {
+            } else if (line.includes('cache_hit_total') && !line.includes('lazy')) {
                 current.hit_total = parseInt(line.split(' ')[1]);
-            } else if (line.startsWith('mosdns_plugin_cache_lazy_hit_total')) {
+            } else if (line.includes('lazy_hit_total')) {
                 current.lazy_hit_total = parseInt(line.split(' ')[1]);
-            } else if (line.startsWith('mosdns_plugin_cache_cache_size')) {
+            } else if (line.includes('cache_size')) {
                 current.cache_size = parseInt(line.split(' ')[1]);
-            } else if (line.startsWith('mosdns_plugin_metrics_collector_response_latency_millisecond_sum')) {
+            } else if (line.includes('latency_millisecond_sum') || line.includes('latency_seconds_sum')) {
                 current.latency_sum = parseFloat(line.split(' ')[1]);
-            } else if (line.startsWith('mosdns_plugin_metrics_collector_response_latency_millisecond_count')) {
+            } else if (line.includes('latency_millisecond_count') || line.includes('latency_seconds_count')) {
                 current.latency_count = parseInt(line.split(' ')[1]);
             }
         });

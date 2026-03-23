@@ -66,28 +66,25 @@ async function startTailer() {
                             }
                             
                             let route = 'cache';
-                            let upstream = data.upstream || '';
+                            let upstream = '';
                             
-                            // Check explicit upstream
-                            if (upstream) {
-                                if (upstream.includes('223.') || upstream.includes('119.') || upstream.includes('114.')) {
-                                    route = 'cn';
-                                } else if (upstream.includes('1.1.1.1') || upstream.includes('8.8.8.8') || upstream.includes('google') || upstream.includes('192.168.2.250') || upstream.includes('proxy')) {
-                                    route = 'proxy';
-                                } else {
-                                    route = 'cn'; // fallback internet route
-                                }
-                            } else {
-                                // No upstream, it means cache, reject, or timeout
-                                upstream = 'Local Cache';
+                            // 彻底使用智能雷达探测（抛弃必定为空的 V5 upstream 参数）
+                            if (latency_ms < 5) {
                                 route = 'cache';
-                                // if it took too long, it was likely a timeout 
-                                if (latency_ms > 100) {
-                                    upstream = 'Timeout/Unknown';
-                                    route = 'unknown';
-                                }
+                                upstream = 'Local Cache';
+                            } else if (latency_ms < 80) { // 放宽到 80ms 包含大部分国内各省份解析
+                                route = 'cn';
+                                upstream = 'Domestic DNS';
+                            } else {
+                                route = 'proxy';
+                                upstream = 'Foreign DNS';
                             }
 
+                            // 对无响应查询进行超时兜底
+                            if (data.resp_rcode !== 0 && latency_ms > 200) {
+                                upstream = 'Timeout/Unknown';
+                                route = 'unknown';
+                            }
                             const domain = data.qname ? data.qname.replace(/\.$/, '') : 'unknown';
                             const type = qtypeMap[data.qtype] || String(data.qtype || 'A');
                             const rcode = data.resp_rcode === 0 ? 'NOERROR' : `ERR${data.resp_rcode}`;
